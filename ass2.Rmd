@@ -1,0 +1,119 @@
+---
+title: "Impact of Severe Weather Events on Economy and Health in the US"
+author: "Christian Nader"
+date: "Thursday, December 18, 2014"
+output: html_document
+---
+
+##1. Introduction
+
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.
+
+##2. Synopsis
+
+##3. Data Processing
+
+The analysis was performed on [Storm Events Database](http://www.ncdc.noaa.gov/stormevents/ftp.jsp), provided by the [National Climatic Data Center](http://www.ncdc.noaa.gov/). The data for this paper come in the form of a comma-separated-value file compressed via the bzip2 algorithm to reduce its size. You can download the file [here](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2).There is also some documentation of the database available. In this [Codebook](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) you can find out how some of the variables are constructed/defined. You can also check out the National Climatic Data Center Storm Events [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf).
+
+First, download and read the data into a data frame called `data`.
+
+```{r, cache = TRUE, results='hide'}
+# Load necessary library
+library(ggplot2)
+library(dplyr)
+```
+
+```{r, cache = TRUE}
+# Loading data
+if (!file.exists("repdata_data_StormData.csv.bz2")) {
+  fileURL <- 'https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2'
+  download.file(fileURL, destfile='repdata_data_StormData.csv.bz2', method = 'curl')
+}
+data <- read.csv(bzfile('repdata_data_StormData.csv.bz2'),header=TRUE, stringsAsFactors = TRUE)
+str(data)
+```
+
+This is a huge amount of data, and a big part of it useless in our investigation, So let's do some cleansing. I'm only keeping the 7 variables that are essential to our study.
+
+```{r, cache = TRUE}
+# Getting rid of excess data
+data <- data %>%
+  select(EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)
+```
+
+We can also get rid of event type observations that resulted in zero values in fatalities, injuries, property and crop damage.
+
+```{r, cache = TRUE}
+# Getting rid of excess data
+data <- data[!(data$FATALITIES==0 & data$INJURIES==0 & data$PROPDMG==0 & data$CROPDMG==0),]
+str(data)
+```
+
+Notice that we went down from 902297 to 254633 observations!
+
+More work needs to be done on the exponant columns, for instance:
+
+```{r, cache = TRUE}
+data$PROPDMGEXP<-toupper(data$PROPDMGEXP)
+data$CROPDMGEXP<-toupper(data$CROPDMGEXP)
+unique(data$PROPDMGEXP)
+unique(data$CROPDMGEXP)
+```
+
+Unfortunately I can't think of another way to do this than manually, so here it goes.
+
+```{r, cache = TRUE}
+data$PROPEXP[data$PROPDMGEXP == "K"] <- 1e+03
+data$PROPEXP[data$PROPDMGEXP == "M"] <- 1e+06
+data$PROPEXP[data$PROPDMGEXP ==  ""] <- 1e+00
+data$PROPEXP[data$PROPDMGEXP == "B"] <- 1e+09
+data$PROPEXP[data$PROPDMGEXP == "0"] <- 1e+00
+data$PROPEXP[data$PROPDMGEXP == "5"] <- 1e+05
+data$PROPEXP[data$PROPDMGEXP == "6"] <- 1e+06
+data$PROPEXP[data$PROPDMGEXP == "4"] <- 1e+04
+data$PROPEXP[data$PROPDMGEXP == "2"] <- 1e+02
+data$PROPEXP[data$PROPDMGEXP == "3"] <- 1e+03
+data$PROPEXP[data$PROPDMGEXP == "7"] <- 1e+07
+data$PROPEXP[data$PROPDMGEXP == "H"] <- 1e+02
+data$PROPEXP[data$PROPDMGEXP == "1"] <- 1e+01
+data$PROPEXP[data$PROPDMGEXP == "8"] <- 1e+08
+data$PROPEXP[data$PROPDMGEXP == "+"] <- 0
+data$PROPEXP[data$PROPDMGEXP == "-"] <- 0
+data$PROPEXP[data$PROPDMGEXP == "?"] <- 0
+
+data$CROPEXP[data$CROPDMGEXP == "M"] <- 1e+06
+data$CROPEXP[data$CROPDMGEXP == "K"] <- 1e+03
+data$CROPEXP[data$CROPDMGEXP == "B"] <- 1e+09
+data$CROPEXP[data$CROPDMGEXP == "0"] <- 1e+00
+data$CROPEXP[data$CROPDMGEXP == "2"] <- 1e+02
+data$CROPEXP[data$CROPDMGEXP ==  ""] <- 1e+00
+data$CROPEXP[data$CROPDMGEXP == "?"] <- 0
+```
+
+I'm gonna get a unique column for both property damage and crop damage by "getting rid" of the exponent columns
+
+```{r, cache = TRUE}
+# Fusing the exp columns with their respective variables
+data <- data %>% 
+  mutate(PROPDMG  = PROPDMG*PROPEXP) %>%
+  mutate(CROPDMG  = CROPDMG*CROPEXP) %>%
+  select(EVTYPE, FATALITIES, INJURIES, PROPDMG, CROPDMG)
+```
+
+I noticed that some `EVTYPE`s repeat themselfs but with a little twist, for example we find rows with `EVTYPE = "Wind Damage"` and others with `EVTYPE = "WIND DAMAGE"`.
+
+```{r, cache = TRUE}
+#Transform all lower case letters to upper case
+data$EVTYPE <- toupper(data$EVTYPE)
+unique(data$EVTYPE)
+#dont use that
+```
+
+For mean values over `EVTYPE`
+
+```{r, cache = TRUE}
+mean_data <- aggregate(. ~ EVTYPE, data = data, mean)
+```
+
