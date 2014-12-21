@@ -1,6 +1,6 @@
 ---
 title: "Impact of Severe Weather Events on Economy and Health in the US"
-author: "Christian Nader"
+author: "Cleitus"
 date: "Thursday, December 18, 2014"
 output: html_document
 ---
@@ -13,16 +13,23 @@ This project involves exploring the U.S. National Oceanic and Atmospheric Admini
 
 ##2. Synopsis
 
+Over 50 years of recorded events, enabled us enough information on large variety of event types. After some reflexion, the real problem comes down to what question are we asking, in other terms, what situation are we in:  
+- Planning for long term projects  
+- Managing imminent events
+
+Those two questions require 2 different approaches, an overall approach (sum over all years), and an average one (mean value for each event type).
+
 ##3. Data Processing
 
 The analysis was performed on [Storm Events Database](http://www.ncdc.noaa.gov/stormevents/ftp.jsp), provided by the [National Climatic Data Center](http://www.ncdc.noaa.gov/). The data for this paper come in the form of a comma-separated-value file compressed via the bzip2 algorithm to reduce its size. You can download the file [here](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2).There is also some documentation of the database available. In this [Codebook](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) you can find out how some of the variables are constructed/defined. You can also check out the National Climatic Data Center Storm Events [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf).
 
 First, download and read the data into a data frame called `data`.
 
-```{r, cache = TRUE, results='hide'}
+```{r, results='hide', message=FALSE}
 # Load necessary library
 library(ggplot2)
 library(dplyr)
+library(gridExtra)
 ```
 
 ```{r, cache = TRUE}
@@ -46,12 +53,23 @@ data <- data %>%
 We can also get rid of event type observations that resulted in zero values in fatalities, injuries, property and crop damage.
 
 ```{r, cache = TRUE}
-# Getting rid of excess data
-data <- data[!(data$FATALITIES==0 & data$INJURIES==0 & data$PROPDMG==0 & data$CROPDMG==0),]
+# Array of documented events
+Events <- c("ASTRONOMICAL LOW TIDE","AVALANCHE","BLIZZARD","COASTAL FLOOD","COLD/WIND CHILL","DEBRIS FLOW","DENSE FOG",
+            "DENSE SMOKE","DROUGHT","DUST DEVIL","DUST STORM","EXCESSIVE HEAT","EXTREME COLD/WIND CHILL","FLASH FLOOD",
+            "FLOOD","FROST/FREEZE","FUNNEL CLOUD","FREEZING FOG","HAIL","HEAT","HEAVY RAIN","HEAVY SNOW","HIGH SURF",
+            "HIGH WIND","HURRICANE (TYPHOON)","ICE STORM","LAKE-EFFECT SNOW","LAKESHORE FLOOD","LIGHTNING","MARINE HAIL",
+            "MARINE HIGH WIND","MARINE STRONG WIND","MARINE THUNDERSTORM WIND","RIP CURRENT","SEICHE","SLEET","STORM SURGE/TIDE",
+            "STRONG WIND","THUNDERSTORM WIND","TORNADO","TROPICAL DEPRESSION","TROPICAL STORM","TSUNAMI","VOLCANIC ASH",
+            "WATERSPOUT","WILDFIRE","WINTER STORM","WINTER WEATHER")
+
+#Filter the events, keep only those documented and have health or financial impact.
+data <- filter(data, toupper(EVTYPE) %in% Events, 
+               ((!is.na(F) & F > 0) | (!is.na(PROPDMG) & PROPDMG > 0)))
+
 str(data)
 ```
 
-Notice that we went down from 902297 to 254633 observations!
+Notice that we went down from 902297 to 161517 observations!
 
 More work needs to be done on the exponant columns, for instance:
 
@@ -62,58 +80,126 @@ unique(data$PROPDMGEXP)
 unique(data$CROPDMGEXP)
 ```
 
-Unfortunately I can't think of another way to do this than manually, so here it goes.
+I'm gonna get a unique column for both property damage and crop damage by "getting rid" of the exponent columns. Here is one way to do it.
 
 ```{r, cache = TRUE}
-data$PROPEXP[data$PROPDMGEXP == "K"] <- 1e+03
-data$PROPEXP[data$PROPDMGEXP == "M"] <- 1e+06
-data$PROPEXP[data$PROPDMGEXP ==  ""] <- 1e+00
-data$PROPEXP[data$PROPDMGEXP == "B"] <- 1e+09
-data$PROPEXP[data$PROPDMGEXP == "0"] <- 1e+00
-data$PROPEXP[data$PROPDMGEXP == "5"] <- 1e+05
-data$PROPEXP[data$PROPDMGEXP == "6"] <- 1e+06
-data$PROPEXP[data$PROPDMGEXP == "4"] <- 1e+04
-data$PROPEXP[data$PROPDMGEXP == "2"] <- 1e+02
-data$PROPEXP[data$PROPDMGEXP == "3"] <- 1e+03
-data$PROPEXP[data$PROPDMGEXP == "7"] <- 1e+07
-data$PROPEXP[data$PROPDMGEXP == "H"] <- 1e+02
-data$PROPEXP[data$PROPDMGEXP == "1"] <- 1e+01
-data$PROPEXP[data$PROPDMGEXP == "8"] <- 1e+08
-data$PROPEXP[data$PROPDMGEXP == "+"] <- 0
-data$PROPEXP[data$PROPDMGEXP == "-"] <- 0
-data$PROPEXP[data$PROPDMGEXP == "?"] <- 0
-
-data$CROPEXP[data$CROPDMGEXP == "M"] <- 1e+06
-data$CROPEXP[data$CROPDMGEXP == "K"] <- 1e+03
-data$CROPEXP[data$CROPDMGEXP == "B"] <- 1e+09
-data$CROPEXP[data$CROPDMGEXP == "0"] <- 1e+00
-data$CROPEXP[data$CROPDMGEXP == "2"] <- 1e+02
-data$CROPEXP[data$CROPDMGEXP ==  ""] <- 1e+00
-data$CROPEXP[data$CROPDMGEXP == "?"] <- 0
-```
-
-I'm gonna get a unique column for both property damage and crop damage by "getting rid" of the exponent columns
-
-```{r, cache = TRUE}
-# Fusing the exp columns with their respective variables
-data <- data %>% 
-  mutate(PROPDMG  = PROPDMG*PROPEXP) %>%
-  mutate(CROPDMG  = CROPDMG*CROPEXP) %>%
+exponent <- function(x) {
+  switch(x, "B"=1e+09, "M"=1e+06, "K"=1e+03, "H"=1e+02, 
+         "0"=0, "1"=1,"2"=2,"3"=3,"4"=4,"5"=5,"6"=6,"7"=7, 0)
+}
+data <- data %>%
+  mutate(PROPDMG = PROPDMG * sapply(PROPDMGEXP, exponent),
+         CROPDMG = CROPDMG * sapply(CROPDMGEXP, exponent)) %>%
   select(EVTYPE, FATALITIES, INJURIES, PROPDMG, CROPDMG)
+
+str(data)
 ```
 
-I noticed that some `EVTYPE`s repeat themselfs but with a little twist, for example we find rows with `EVTYPE = "Wind Damage"` and others with `EVTYPE = "WIND DAMAGE"`.
-
-```{r, cache = TRUE}
-#Transform all lower case letters to upper case
-data$EVTYPE <- toupper(data$EVTYPE)
-unique(data$EVTYPE)
-#dont use that
-```
-
-For mean values over `EVTYPE`
+Last step, get the **total** casualties/damages for each event type (this is useful for long term planning), and the **average** casualty/damage per event type (this is particularly useful in case of managing ongoing events).
 
 ```{r, cache = TRUE}
 mean_data <- aggregate(. ~ EVTYPE, data = data, mean)
+data      <- aggregate(. ~ EVTYPE, data = data, sum)
+
+#Final shape of the data frame that's gonna be used to plot the results
+str(data)
+str(mean_data)
 ```
 
+Finally seperate the data related to health from that which is related to economy.
+
+```{r, cache = TRUE}
+health <- data %>%
+  select(EVTYPE, FATALITIES, INJURIES)%>%
+  arrange(desc(FATALITIES))
+
+econ <- data %>%
+  select(EVTYPE, PROPDMG, CROPDMG)%>%
+  arrange(desc(PROPDMG))
+
+m_health <- mean_data %>%
+  select(EVTYPE, FATALITIES, INJURIES)%>%
+  arrange(desc(FATALITIES))
+
+m_econ <- mean_data %>%
+  select(EVTYPE, PROPDMG, CROPDMG)%>%
+  arrange(desc(PROPDMG))
+
+m_econ$damage     <- m_econ$PROPDMG + m_econ$CROPDMG
+m_health$casualty <- m_health$FATALITIES + m_health$INJURIES
+```
+
+##4. Results
+
+####Overall impact on health
+From a health percpective, overall between 1950 and 2011:
+
+```{r}
+p1 <- ggplot(head(health,10), aes(x=reorder(EVTYPE, FATALITIES), y=FATALITIES))
+p2 <- ggplot(head(arrange(health, desc(INJURIES)),10), 
+             aes(x=reorder(EVTYPE, INJURIES), y=INJURIES))
+
+p1 <- p1 + geom_bar(stat="identity", colour="blue", fill="blue")+
+  theme(axis.text.x=element_text(angle=-320, hjust = 1))+
+  labs(x="Weather events", y="Fatalities", 
+       title="Top 10 in number of Fatalities")
+
+p2 <- p2 + geom_bar(stat="identity", colour="blue", fill="blue")+
+  theme(axis.text.x=element_text(angle=-320, hjust = 1))+
+  labs(x="Weather events", y="Injuries", 
+       title="Top 10 in number of Injuries")
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+####Overall impact on the economy
+
+From a economic point of vue, overall between 1950 and 2011:
+
+```{r}
+p1 <- ggplot(head(econ,10), aes(x=reorder(EVTYPE, PROPDMG), y=PROPDMG))
+p2 <- ggplot(head(arrange(econ, desc(CROPDMG)),10), 
+             aes(x=reorder(EVTYPE, CROPDMG), y=CROPDMG))
+
+p1 <- p1 + geom_bar(stat="identity", colour="blue", fill="blue")+
+  theme(axis.text.x=element_text(angle =-320, hjust = 1))+
+  labs(x="", y="Property damage", 
+       title="Top 10 in Property damage")
+
+p2 <- p2 + geom_bar(stat="identity", colour="blue", fill="blue")+
+  theme(axis.text.x=element_text(angle=-320, hjust = 1))+
+  labs(x="", y="Crop damage", 
+       title="Top 10 in Crop damage")
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+####Average impact on health/economy per occurence
+
+Now for a look on the top 10 events in each category, but this time in the term of average damage of an event if it occures:
+
+```{r}
+
+
+p1 <- ggplot(head(m_health,10), aes(x=reorder(EVTYPE, casualty), y=casualty))
+#p2 <- ggplot(head(arrange(m_health, desc(INJURIES)),10), 
+#             aes(x=reorder(EVTYPE, INJURIES), y=INJURIES))
+p3 <- ggplot(head(m_econ,10), aes(x=reorder(EVTYPE, damage), y=damage))
+#p4 <- ggplot(head(arrange(econ, desc(CROPDMG)),10), 
+#             aes(x=reorder(EVTYPE, CROPDMG), y=CROPDMG))
+
+p1 <- p1 + geom_bar(stat="identity", colour="blue", fill="blue")+
+  theme(axis.text.x=element_text(angle=-320, hjust = 1))+
+  labs(x="", y="Fatalities + Injuries", title="Avg nbr of Casualties in occurence")
+#p2 <- p2 + geom_bar(stat="identity", colour="blue", fill="blue")+
+#  theme(axis.text.x=element_text(angle=-320, hjust = 1))+
+#  labs(x="", y="Injuries", title="Top 10 in number of Injuries")
+p3 <- p3 + geom_bar(stat="identity", colour="blue", fill="blue")+
+  theme(axis.text.x=element_text(angle=-320, hjust = 1))+
+  labs(x="", y="Property + crop damage", title="Avg damage in occurence")
+#p4 <- p4 + geom_bar(stat="identity", colour="blue", fill="blue")+
+#  theme(axis.text.x=element_text(angle=-320, hjust = 1))+
+#  labs(x="", y="Crop damage", title="Top 10 in Crop damage")
+
+grid.arrange(p1, p3, ncol = 2)
+```
