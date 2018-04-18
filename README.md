@@ -1,4 +1,4 @@
 rep_res
 =======
 
-Repsoducible Research Coursera
+Repsoducible Research
